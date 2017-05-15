@@ -38,6 +38,13 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="ConsoleInitializer.cs" />
+    <Compile Include="Console\IConsole.cs" />
+    <Compile Include="Console\IConsoleDispatcher.cs" />
+    <Compile Include="Console\IConsoleStatus.cs" />
+    <Compile Include="Console\IHost.cs" />
+    <Compile Include="Console\IOutputConsole.cs" />
+    <Compile Include="Console\IOutputConsoleProvider.cs" />
+    <Compile Include="Console\VsKeyInfo.cs" />
     <Compile Include="DebugConsoleMessageEventArgs.cs" />
     <Compile Include="DisplayNameAttribute.cs" />
     <Compile Include="HostNameAttribute.cs" />
