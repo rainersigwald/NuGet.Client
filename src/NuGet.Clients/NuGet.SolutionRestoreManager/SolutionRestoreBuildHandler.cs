@@ -1,4 +1,4 @@
-﻿// Copyright (c) .NET Foundation. All rights reserved.
+// Copyright (c) .NET Foundation. All rights reserved.
 // Licensed under the Apache License, Version 2.0. See License.txt in the project root for license information.
 
 using System;
@@ -159,9 +159,36 @@ namespace NuGet.SolutionRestoreManager
 
         public void UpdateSolution_EndLastUpdateAction() { }
 
-        public void UpdateSolution_BeginUpdateAction(uint dwAction) { }
+        public void UpdateSolution_BeginUpdateAction(uint dwAction)
+        {
+            ThreadHelper.ThrowIfNotOnUIThread();
 
-        public void UpdateSolution_EndUpdateAction(uint dwAction) { }
+            if (dwAction == (uint)VSSOLNBUILDUPDATEFLAGS.SBF_OPERATION_CLEAN)
+            {
+                // Clear the project.json restore cache on clean to ensure that the next build restores again
+                SolutionRestoreWorker.Value.CleanCache();
+
+                return;
+            }
+            else if (dwAction == REBUILD_FLAG || dwAction == (uint)VSSOLNBUILDUPDATEFLAGS.SBF_OPERATION_BUILD)
+            {
+                // start restore task only when it's a build or rebuild action
+                if (!ShouldRestoreOnBuild)
+                {
+                    return;
+                }
+
+                // set forceRestroe flag and start a restore task
+                var forceRestore = dwAction == REBUILD_FLAG;
+                _restoreTask = RestoreTask.Start(SolutionRestoreWorker.Value, forceRestore);
+            }
+        }
+
+        public void UpdateSolution_EndUpdateAction(uint dwAction)
+        {
+            _restoreTask.Dispose();
+            _restoreTask = RestoreTask.None;
+        }
 
         public void OnActiveProjectCfgChangeBatchBegin() { }
 
@@ -219,30 +246,6 @@ namespace NuGet.SolutionRestoreManager
         /// <returns>If the method succeeds, it returns S_OK. If it fails, it returns an error code.</returns>
         public int UpdateSolution_Begin(ref int cancelUpdate)
         {
-            ThreadHelper.ThrowIfNotOnUIThread();
-
-            // Query build manager operation flag
-            uint buildManagerOperation;
-            ErrorHandler.ThrowOnFailure(
-                _solutionBuildManager.QueryBuildManagerBusyEx(out buildManagerOperation));
-
-            if (buildManagerOperation == (uint)VSSOLNBUILDUPDATEFLAGS.SBF_OPERATION_CLEAN)
-            {
-                // Clear the project.json restore cache on clean to ensure that the next build restores again
-                SolutionRestoreWorker.Value.CleanCache();
-
-                return VSConstants.S_OK;
-            }
-
-            if (!ShouldRestoreOnBuild)
-            {
-                return VSConstants.S_OK;
-            }
-
-            // start a restore task
-            var forceRestore = buildManagerOperation == REBUILD_FLAG;
-            _restoreTask = RestoreTask.Start(SolutionRestoreWorker.Value, forceRestore);
-
             return VSConstants.S_OK;
         }
 
@@ -269,9 +272,6 @@ namespace NuGet.SolutionRestoreManager
         /// <returns>If the method succeeds, it returns S_OK. If it fails, it returns an error code.</returns>
         public int UpdateSolution_Done(int succeeded, int modified, int cancelCommand)
         {
-            _restoreTask.Dispose();
-            _restoreTask = RestoreTask.None;
-
             return VSConstants.S_OK;
         }
 
