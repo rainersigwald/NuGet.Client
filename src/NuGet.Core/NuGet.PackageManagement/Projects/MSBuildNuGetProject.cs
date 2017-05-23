@@ -1,4 +1,4 @@
-﻿// Copyright (c) .NET Foundation. All rights reserved.
+// Copyright (c) .NET Foundation. All rights reserved.
 // Licensed under the Apache License, Version 2.0. See License.txt in the project root for license information.
 
 using System;
@@ -141,7 +141,8 @@ namespace NuGet.ProjectManagement
                 throw new ArgumentNullException(nameof(nuGetProjectContext));
             }
 
-            if (!downloadResourceResult.PackageStream.CanSeek)
+            if (downloadResourceResult.Status != DownloadResourceResultStatus.AvailableWithoutStream &&
+                !downloadResourceResult.PackageStream.CanSeek)
             {
                 throw new ArgumentException(Strings.PackageStreamShouldBeSeekable);
             }
@@ -159,15 +160,23 @@ namespace NuGet.ProjectManagement
             }
 
             // Step-2: Create PackageArchiveReader using the PackageStream and obtain the various item groups
-            downloadResourceResult.PackageStream.Seek(0, SeekOrigin.Begin);
-            var packageReader = downloadResourceResult.PackageReader ?? new PackageArchiveReader(downloadResourceResult.PackageStream, leaveStreamOpen: true);
+            if (downloadResourceResult.Status != DownloadResourceResultStatus.AvailableWithoutStream)
+            {
+                downloadResourceResult.PackageStream.Seek(0, SeekOrigin.Begin);
+            }
 
-            var libItemGroups = packageReader.GetLibItems();
-            var referenceItemGroups = packageReader.GetReferenceItems();
-            var frameworkReferenceGroups = packageReader.GetFrameworkItems();
-            var contentFileGroups = packageReader.GetContentItems();
-            var buildFileGroups = packageReader.GetBuildItems();
-            var toolItemGroups = packageReader.GetToolItems();
+            // These casts enforce use of -Async(...) methods.
+            var packageReader = downloadResourceResult.PackageReader
+                ?? new PackageArchiveReader(downloadResourceResult.PackageStream, leaveStreamOpen: true);
+            IAsyncPackageContentReader packageContentReader = packageReader;
+            IAsyncPackageCoreReader packageCoreReader = packageReader;
+
+            var libItemGroups = await packageContentReader.GetLibItemsAsync(token);
+            var referenceItemGroups = await packageContentReader.GetReferenceItemsAsync(token);
+            var frameworkReferenceGroups = await packageContentReader.GetFrameworkItemsAsync(token);
+            var contentFileGroups = await packageContentReader.GetContentItemsAsync(token);
+            var buildFileGroups = await packageContentReader.GetBuildItemsAsync(token);
+            var toolItemGroups = await packageContentReader.GetToolItemsAsync(token);
 
             // Step-3: Get the most compatible items groups for all items groups
             var hasCompatibleProjectLevelContent = false;
@@ -220,7 +229,7 @@ namespace NuGet.ProjectManagement
                 if (!onlyHasCompatibleTools)
                 {
                     // If it does not have compatible tool items either, check if it at least has dependencies
-                    onlyHasDependencies = packageReader.GetPackageDependencies().Any();
+                    onlyHasDependencies = (await packageContentReader.GetPackageDependenciesAsync(token)).Any();
                 }
             }
             else
@@ -322,8 +331,12 @@ namespace NuGet.ProjectManagement
                 // Step-8.3: Add Content Files
                 if (MSBuildNuGetProjectSystemUtility.IsValid(compatibleContentFilesGroup))
                 {
-                    MSBuildNuGetProjectSystemUtility.AddFiles(MSBuildNuGetProjectSystem,
-                        packageReader, compatibleContentFilesGroup, FileTransformers);
+                    await MSBuildNuGetProjectSystemUtility.AddFilesAsync(
+                        MSBuildNuGetProjectSystem,
+                        packageCoreReader,
+                        compatibleContentFilesGroup,
+                        FileTransformers,
+                        token);
                 }
 
                 // Step-8.4: Add Build imports
@@ -499,11 +512,13 @@ namespace NuGet.ProjectManagement
                         var packagesPaths = (await GetInstalledPackagesAsync(token))
                             .Select(pr => FolderNuGetProject.GetInstalledPackageFilePath(pr.PackageIdentity));
 
-                        MSBuildNuGetProjectSystemUtility.DeleteFiles(MSBuildNuGetProjectSystem,
+                        await MSBuildNuGetProjectSystemUtility.DeleteFilesAsync(
+                            MSBuildNuGetProjectSystem,
                             zipArchive,
                             packagesPaths,
                             compatibleContentFilesGroup,
-                            FileTransformers);
+                            FileTransformers,
+                            token);
                     }
 
                     // Step-7.4: Remove build imports
@@ -607,7 +622,7 @@ namespace NuGet.ProjectManagement
 
             // Some projects like website project don't have project file.
             // Return empty list for this case.
-            if (String.IsNullOrEmpty(MSBuildNuGetProjectSystem.ProjectFileFullPath))
+            if (string.IsNullOrEmpty(MSBuildNuGetProjectSystem.ProjectFileFullPath))
             {
                 return new List<PackageSpec>();
             }

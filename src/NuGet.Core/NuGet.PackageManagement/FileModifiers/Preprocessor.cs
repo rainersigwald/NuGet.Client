@@ -10,9 +10,9 @@ using System.Threading.Tasks;
 namespace NuGet.ProjectManagement
 {
     /// <summary>
-    /// Represents a package file transformer.
+    /// Simple token replacement system for content files.
     /// </summary>
-    public interface IPackageFileTransformer
+    public class Preprocessor : IPackageFileTransformer
     {
         /// <summary>
         /// Asynchronously transforms a file.
@@ -28,11 +28,30 @@ namespace NuGet.ProjectManagement
         /// is <c>null</c>.</exception>
         /// <exception cref="OperationCanceledException">Thrown if <paramref name="cancellationToken" />
         /// is cancelled.</exception>
-        Task TransformFileAsync(
+        public async Task TransformFileAsync(
             Func<Task<Stream>> streamTaskFactory,
             string targetPath,
             IMSBuildNuGetProjectSystem projectSystem,
-            CancellationToken cancellationToken);
+            CancellationToken cancellationToken)
+        {
+            if (streamTaskFactory == null)
+            {
+                throw new ArgumentNullException(nameof(streamTaskFactory));
+            }
+
+            if (projectSystem == null)
+            {
+                throw new ArgumentNullException(nameof(projectSystem));
+            }
+
+            cancellationToken.ThrowIfCancellationRequested();
+
+            await MSBuildNuGetProjectSystemUtility.TryAddFileAsync(
+                projectSystem,
+                targetPath,
+                async () => StreamUtility.StreamFromString(await ProcessAsync(streamTaskFactory, projectSystem, cancellationToken)),
+                cancellationToken);
+        }
 
         /// <summary>
         /// Asynchronously reverses the transform on the targetPath, using all the potential source of change.
@@ -45,17 +64,45 @@ namespace NuGet.ProjectManagement
         /// <returns>A task that represents the asynchronous operation.</returns>
         /// <exception cref="ArgumentNullException">Thrown if <paramref name="streamTaskFactory" />
         /// is <c>null</c>.</exception>
-        /// <exception cref="ArgumentNullException">Thrown if <paramref name="matchingFiles" />
-        /// is <c>null</c>.</exception>
         /// <exception cref="ArgumentNullException">Thrown if <paramref name="projectSystem" />
         /// is <c>null</c>.</exception>
         /// <exception cref="OperationCanceledException">Thrown if <paramref name="cancellationToken" />
         /// is cancelled.</exception>
-        Task RevertFileAsync(
+        public async Task RevertFileAsync(
             Func<Task<Stream>> streamTaskFactory,
             string targetPath,
             IEnumerable<InternalZipFileInfo> matchingFiles,
             IMSBuildNuGetProjectSystem projectSystem,
-            CancellationToken cancellationToken);
+            CancellationToken cancellationToken)
+        {
+            if (streamTaskFactory == null)
+            {
+                throw new ArgumentNullException(nameof(streamTaskFactory));
+            }
+
+            if (projectSystem == null)
+            {
+                throw new ArgumentNullException(nameof(projectSystem));
+            }
+
+            cancellationToken.ThrowIfCancellationRequested();
+
+            await MSBuildNuGetProjectSystemUtility.DeleteFileSafeAsync(
+                targetPath,
+                async () => StreamUtility.StreamFromString(await ProcessAsync(streamTaskFactory, projectSystem, cancellationToken)),
+                projectSystem,
+                cancellationToken);
+        }
+
+        internal static Task<string> ProcessAsync(
+            Func<Task<Stream>> streamTaskFactory,
+            IMSBuildNuGetProjectSystem projectSystem,
+            CancellationToken cancellationToken)
+        {
+            return Common.Preprocessor.ProcessAsync(
+                streamTaskFactory,
+                propName => projectSystem.GetPropertyValue(propName),
+                cancellationToken);
+        }
     }
 }

@@ -1,4 +1,4 @@
-﻿// Copyright (c) .NET Foundation. All rights reserved.
+// Copyright (c) .NET Foundation. All rights reserved.
 // Licensed under the Apache License, Version 2.0. See License.txt in the project root for license information.
 
 using System;
@@ -8,6 +8,7 @@ using System.IO;
 using System.IO.Compression;
 using System.Linq;
 using System.Threading;
+using System.Threading.Tasks;
 using NuGet.Common;
 using NuGet.Frameworks;
 using NuGet.PackageManagement;
@@ -77,7 +78,11 @@ namespace NuGet.ProjectManagement
             return false;
         }
 
-        internal static void TryAddFile(IMSBuildNuGetProjectSystem msBuildNuGetProjectSystem, string path, Func<Stream> content)
+        internal static async Task TryAddFileAsync(
+            IMSBuildNuGetProjectSystem msBuildNuGetProjectSystem,
+            string path,
+            Func<Task<Stream>> streamTaskFactory,
+            CancellationToken cancellationToken)
         {
             if (msBuildNuGetProjectSystem.FileExistsInProject(path))
             {
@@ -90,7 +95,7 @@ namespace NuGet.ProjectManagement
                 {
                     // overwrite
                     msBuildNuGetProjectSystem.NuGetProjectContext.Log(MessageLevel.Info, Strings.Info_OverwritingExistingFile, path);
-                    using (var stream = content())
+                    using (var stream = await streamTaskFactory())
                     {
                         msBuildNuGetProjectSystem.AddFile(path, stream);
                     }
@@ -103,14 +108,15 @@ namespace NuGet.ProjectManagement
             }
             else
             {
-                msBuildNuGetProjectSystem.AddFile(path, content());
+                msBuildNuGetProjectSystem.AddFile(path, await streamTaskFactory());
             }
         }
 
-        internal static void AddFiles(IMSBuildNuGetProjectSystem msBuildNuGetProjectSystem,
-            IPackageCoreReader packageReader,
+        internal static async Task AddFilesAsync(IMSBuildNuGetProjectSystem msBuildNuGetProjectSystem,
+            IAsyncPackageCoreReader packageReader,
             FrameworkSpecificGroup frameworkSpecificGroup,
-            IDictionary<FileTransformExtensions, IPackageFileTransformer> fileTransformers)
+            IDictionary<FileTransformExtensions, IPackageFileTransformer> fileTransformers,
+            CancellationToken cancellationToken)
         {
             var packageTargetFramework = frameworkSpecificGroup.TargetFramework;
 
@@ -151,8 +157,11 @@ namespace NuGet.ProjectManagement
                 {
                     if (installTransformer != null)
                     {
-                        installTransformer.TransformFile(() => packageReader.GetStream(file), path,
-                            msBuildNuGetProjectSystem);
+                        await installTransformer.TransformFileAsync(
+                            () => packageReader.GetStreamAsync(file, cancellationToken),
+                            path,
+                            msBuildNuGetProjectSystem,
+                            cancellationToken);
                     }
                     else
                     {
@@ -165,18 +174,24 @@ namespace NuGet.ProjectManagement
                         {
                             continue;
                         }
-                        TryAddFile(msBuildNuGetProjectSystem, path, () => packageReader.GetStream(file));
+
+                        await TryAddFileAsync(
+                            msBuildNuGetProjectSystem,
+                            path,
+                            () => packageReader.GetStreamAsync(file, cancellationToken),
+                            cancellationToken);
                     }
                 }
             }
         }
 
         [System.Diagnostics.CodeAnalysis.SuppressMessage("Microsoft.Reliability", "CA2000:Dispose objects before losing scope")]
-        internal static void DeleteFiles(IMSBuildNuGetProjectSystem projectSystem,
+        internal static async Task DeleteFilesAsync(IMSBuildNuGetProjectSystem projectSystem,
             ZipArchive zipArchive,
             IEnumerable<string> otherPackagesPath,
             FrameworkSpecificGroup frameworkSpecificGroup,
-            IDictionary<FileTransformExtensions, IPackageFileTransformer> fileTransformers)
+            IDictionary<FileTransformExtensions, IPackageFileTransformer> fileTransformers,
+            CancellationToken cancellationToken)
         {
             var packageTargetFramework = frameworkSpecificGroup.TargetFramework;
             IPackageFileTransformer transformer;
@@ -194,7 +209,7 @@ namespace NuGet.ProjectManagement
                 orderby directory.Length descending
                 select directory;
 
-            string projectFullPath = projectSystem.ProjectFullPath;
+            var projectFullPath = projectSystem.ProjectFullPath;
 
             // Remove files from every directory
             foreach (var directory in directories)
@@ -268,8 +283,11 @@ namespace NuGet.ProjectManagement
                                 var zipArchiveFileEntry = PathUtility.GetEntry(zipArchive, file);
                                 if (zipArchiveFileEntry != null)
                                 {
-                                    transformer.RevertFile(zipArchiveFileEntry.Open, path, matchingFiles,
-                                        projectSystem);
+                                    await transformer.RevertFileAsync(
+                                        () => Task.FromResult(zipArchiveFileEntry.Open()),
+                                        path, matchingFiles,
+                                        projectSystem,
+                                        cancellationToken);
                                 }
                             }
                             catch (Exception e)
@@ -284,7 +302,11 @@ namespace NuGet.ProjectManagement
                                 var zipArchiveFileEntry = PathUtility.GetEntry(zipArchive, file);
                                 if (zipArchiveFileEntry != null)
                                 {
-                                    DeleteFileSafe(path, zipArchiveFileEntry.Open, projectSystem);
+                                    await DeleteFileSafeAsync(
+                                        path,
+                                        () => Task.FromResult(zipArchiveFileEntry.Open()),
+                                        projectSystem,
+                                        cancellationToken);
                                 }
                             }
                             catch (Exception e)
@@ -329,13 +351,17 @@ namespace NuGet.ProjectManagement
             return msBuildNuGetProjectSystem.GetFiles(path, filter, recursive);
         }
 
-        internal static void DeleteFileSafe(string path, Func<Stream> streamFactory, IMSBuildNuGetProjectSystem msBuildNuGetProjectSystem)
+        internal static async Task DeleteFileSafeAsync(
+            string path,
+            Func<Task<Stream>> streamFactory,
+            IMSBuildNuGetProjectSystem msBuildNuGetProjectSystem,
+            CancellationToken cancellationToken)
         {
             // Only delete the file if it exists and the checksum is the same
             if (msBuildNuGetProjectSystem.FileExistsInProject(path))
             {
                 var fullPath = Path.Combine(msBuildNuGetProjectSystem.ProjectFullPath, path);
-                if (FileSystemUtility.ContentEquals(fullPath, streamFactory))
+                if (await FileSystemUtility.ContentEqualsAsync(fullPath, streamFactory))
                 {
                     PerformSafeAction(() => msBuildNuGetProjectSystem.RemoveFile(path), msBuildNuGetProjectSystem.NuGetProjectContext);
                 }
