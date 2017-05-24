@@ -35,6 +35,10 @@ namespace NuGet.ProjectManagement
             get { return InternalMetadata; }
         }
 
+        private bool _initialized;
+
+        private readonly object _lckObj = new object();
+
         /// <summary>
         /// This installs a package into the NuGetProject using the <see cref="Stream"/> passed in
         /// <param name="downloadResourceResult"></param>
@@ -74,11 +78,34 @@ namespace NuGet.ProjectManagement
             return Task.FromResult(0);
         }
 
+        public virtual void EnsureMetadataInitialized()
+        {
+            // do nothing by default.
+        }
+
+        private void EnsureInitialized()
+        {
+            lock (_lckObj)
+            {
+                if (!_initialized)
+                {
+                    _initialized = true;
+
+                    EnsureMetadataInitialized();
+                }
+            }
+        }
+
         public T GetMetadata<T>(string key)
         {
             if (key == null)
             {
                 throw new ArgumentNullException("key");
+            }
+
+            if (!_initialized)
+            {
+                EnsureInitialized();
             }
 
             var value = Metadata[key];
@@ -88,6 +115,11 @@ namespace NuGet.ProjectManagement
         public bool TryGetMetadata<T>(string key, out T value)
         {
             value = default(T);
+
+            if (!_initialized)
+            {
+                EnsureInitialized();
+            }
 
             object oValue;
             if (Metadata.TryGetValue(key, out oValue))

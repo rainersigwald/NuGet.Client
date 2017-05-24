@@ -92,10 +92,14 @@ namespace NuGet.ProjectManagement
             MSBuildNuGetProjectSystem = msbuildNuGetProjectSystem;
             FolderNuGetProject = new FolderNuGetProject(folderNuGetProjectPath);
             InternalMetadata.Add(NuGetProjectMetadataKeys.Name, MSBuildNuGetProjectSystem.ProjectName);
-            InternalMetadata.Add(NuGetProjectMetadataKeys.TargetFramework, MSBuildNuGetProjectSystem.TargetFramework);
-            InternalMetadata.Add(NuGetProjectMetadataKeys.FullPath, msbuildNuGetProjectSystem.ProjectFullPath);
-            InternalMetadata.Add(NuGetProjectMetadataKeys.UniqueName, msbuildNuGetProjectSystem.ProjectUniqueName);
             PackagesConfigNuGetProject = new PackagesConfigNuGetProject(packagesConfigFolderPath, InternalMetadata);
+        }
+
+        public override void EnsureMetadataInitialized()
+        {
+            InternalMetadata.Add(NuGetProjectMetadataKeys.TargetFramework, MSBuildNuGetProjectSystem.TargetFramework);
+            InternalMetadata.Add(NuGetProjectMetadataKeys.FullPath, MSBuildNuGetProjectSystem.ProjectFullPath);
+            InternalMetadata.Add(NuGetProjectMetadataKeys.UniqueName, MSBuildNuGetProjectSystem.ProjectUniqueName);
         }
 
         public override Task<IEnumerable<PackageReference>> GetInstalledPackagesAsync(CancellationToken token)

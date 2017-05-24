@@ -50,8 +50,6 @@ namespace NuGet.ProjectManagement
         /// </summary>
         private string PackagesProjectNameConfigPath { get; }
 
-        private NuGetFramework TargetFramework { get; }
-
         public PackagesConfigNuGetProject(string folderPath, Dictionary<string, object> metadata)
             : base(metadata)
         {
@@ -60,11 +58,9 @@ namespace NuGet.ProjectManagement
                 throw new ArgumentNullException(nameof(folderPath));
             }
 
-            TargetFramework = GetMetadata<NuGetFramework>(NuGetProjectMetadataKeys.TargetFramework);
-
             PackagesConfigPath = Path.Combine(folderPath, "packages.config");
 
-            var projectName = GetMetadata<string>(NuGetProjectMetadataKeys.Name);
+            var projectName = Metadata[NuGetProjectMetadataKeys.Name];
             PackagesProjectNameConfigPath = Path.Combine(folderPath, "packages." + projectName + ".config");
         }
 
@@ -86,7 +82,8 @@ namespace NuGet.ProjectManagement
             }
 
             var isDevelopmentDependency = CheckDevelopmentDependency(downloadResourceResult);
-            var newPackageReference = new PackageReference(packageIdentity, TargetFramework, userInstalled: true, developmentDependency: isDevelopmentDependency, requireReinstallation: false);
+            var targetFramework = GetMetadata<NuGetFramework>(NuGetProjectMetadataKeys.TargetFramework);
+            var newPackageReference = new PackageReference(packageIdentity, targetFramework, userInstalled: true, developmentDependency: isDevelopmentDependency, requireReinstallation: false);
             var installedPackagesList = GetInstalledPackagesList();
 
             try
